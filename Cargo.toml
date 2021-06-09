@@ -1,0 +1,29 @@
+[package]
+name = "fluid_simulation"
+version = "0.1.0"
+authors = ["kugiyasan <kugiyasan@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# Remove the dynamic feature when releasing the executable
+# bevy = { version = "0.5.0", features = ["dynamic"] }
+# bevy = "0.5.0"
+# For some reasons the audio doesn't work for me, so I need to disable the feature
+bevy = { version = "0.5.0", default-features = false, features = [
+    # "bevy_audio",
+    "bevy_dynamic_plugin",
+    "bevy_gilrs",
+    "bevy_gltf",
+    "bevy_wgpu",
+    "bevy_winit",
+    "dynamic",
+    "render",
+    "png",
+    "hdr",
+    # "mp3",
+    "x11",
+] }
+
+rand = "0.8.3"

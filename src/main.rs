@@ -7,18 +7,18 @@ use bevy::render::pipeline::RenderPipeline;
 use bevy::render::shader::ShaderStage;
 use bevy::render::shader::ShaderStages;
 use bevy::window::CursorMoved;
-use bevy::window::WindowResized;
+// use bevy::window::WindowResized;
 
 // https://youtu.be/qsYE1wMEMPA
-// https://bevy-cheatbook.github.io/cookbook/clear-color.html
+// https://www.autodesk.com/research/publications/real-time-fluid-dynamics
 // ! Each call to angle_between should make sure the vector's length isn't zero
 
-const WIDTH: usize = 20;
-const HEIGHT: usize = 20;
-const CELL_SIZE: f32 = 30.0;
-// const WIDTH: usize = 50;
-// const HEIGHT: usize = 50;
-// const CELL_SIZE: f32 = 20.0;
+// const WIDTH: usize = 10;
+// const HEIGHT: usize = 10;
+// const CELL_SIZE: f32 = 50.0;
+const WIDTH: usize = 50;
+const HEIGHT: usize = 50;
+const CELL_SIZE: f32 = 20.0;
 
 const VERTEX_SHADER: &str = r"
 #version 450
@@ -93,6 +93,20 @@ impl Grid {
         let n4 = attr(&self.0[y_plus][x]);
         let avg = (n1 + n2 + n3 + n4) / 4.0;
         avg
+    }
+
+    pub fn get_velocity_gradient(&self, x: usize, y: usize) -> f32 {
+        let x_plus = (x + 1) % WIDTH;
+        let x_minus = (x + WIDTH - 1) % WIDTH;
+        let y_plus = (y + 1) % HEIGHT;
+        let y_minus = (y + HEIGHT - 1) % HEIGHT;
+
+        let vx1 = self.0[y][x_plus].velocity.x;
+        let vx2 = self.0[y][x_minus].velocity.x;
+        let vy1 = self.0[y_plus][x].velocity.y;
+        let vy2 = self.0[y_minus][x].velocity.y;
+        let vel_grad = (vx1 - vx2 + vy1 - vy2) / 2.0;
+        vel_grad
     }
 }
 
@@ -218,7 +232,7 @@ fn window_startup_system(mut windows: ResMut<Windows>) {
 fn diffusion_system(time: Res<Time>, mut qg: Query<&mut Grid>) {
     if let Ok(mut grid) = qg.single_mut() {
         let mut new_grid = grid.clone();
-        let k = 15.0 * time.delta_seconds();
+        let k = 5.0 * time.delta_seconds();
         for _ in 0..5 {
             for y in 0..HEIGHT {
                 for x in 0..WIDTH {
@@ -235,13 +249,6 @@ fn diffusion_system(time: Res<Time>, mut qg: Query<&mut Grid>) {
             }
         }
         *grid = new_grid;
-
-        // TODO remove this
-        for y in 0..HEIGHT {
-            for x in 0..WIDTH {
-                grid.0[y][x].velocity *= 0.99;
-            }
-        }
     }
 }
 
@@ -279,8 +286,78 @@ fn advection_system(time: Res<Time>, mut qg: Query<&mut Grid>) {
     }
 }
 
+struct PField(Vec<Vec<f32>>);
+
+impl PField {
+    pub fn new() -> Self {
+        Self(vec![vec![0.0; WIDTH]; HEIGHT])
+    }
+
+    fn get_gradient(&self, x: usize, y: usize) -> Vec2 {
+        let x_plus = (x + 1) % WIDTH;
+        let x_minus = (x + WIDTH - 1) % WIDTH;
+        let y_plus = (y + 1) % HEIGHT;
+        let y_minus = (y + HEIGHT - 1) % HEIGHT;
+
+        let i = (self.0[y][x_plus] - self.0[y][x_minus]) / 2.0;
+        let j = (self.0[y_plus][x] - self.0[y_minus][x]) / 2.0;
+
+        Vec2::new(i, j)
+    }
+
+    fn get_average(&self, x: usize, y: usize) -> f32 {
+        let x_plus = (x + 1) % WIDTH;
+        let x_minus = (x + WIDTH - 1) % WIDTH;
+        let y_plus = (y + 1) % HEIGHT;
+        let y_minus = (y + HEIGHT - 1) % HEIGHT;
+
+        let px1 = self.0[y][x_plus];
+        let px2 = self.0[y][x_minus];
+        let py1 = self.0[y_plus][x];
+        let py2 = self.0[y_minus][x];
+
+        let p = (px1 + px2 + py1 + py2) / 4.0;
+        p
+    }
+}
+
+fn create_velocity_gradient_quarter_field(grid: &Grid) -> Vec<Vec<f32>> {
+    let mut vel_grad_field = Vec::with_capacity(HEIGHT);
+    for y in 0..HEIGHT {
+        let mut row = Vec::with_capacity(WIDTH);
+        for x in 0..WIDTH {
+            let vel_grad = grid.get_velocity_gradient(x, y) / 4.0;
+            row.push(vel_grad);
+        }
+        vel_grad_field.push(row);
+    }
+
+    vel_grad_field
+}
+
 fn clear_divergence_system(mut qg: Query<&mut Grid>) {
-    if let Ok(mut grid) = qg.single_mut() {}
+    if let Ok(mut grid) = qg.single_mut() {
+        let mut p = PField::new();
+        // vel_grad_field_quarter contains the value of the velocity gradient divided by 4
+        let vel_grad_field_quarter = create_velocity_gradient_quarter_field(&grid);
+
+        for _ in 0..5 {
+            for y in 0..HEIGHT {
+                for x in 0..WIDTH {
+                    p.0[y][x] = p.get_average(x, y) - vel_grad_field_quarter[y][x];
+                }
+            }
+        }
+
+        // Substracting the curl-free vector field from the original field
+        // to get a divergence-free field
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let grad_p = p.get_gradient(x, y);
+                grid.0[y][x].velocity -= grad_p;
+            }
+        }
+    }
 }
 
 /// Display the grid density values as squares
@@ -370,6 +447,7 @@ fn mouse_events_system(
     // }
 }
 
+/// https://github.com/bevyengine/bevy/blob/main/examples/input/char_input_events.rs
 fn char_event_system(
     mut qg: Query<&mut Grid>,
     mut char_input_events: EventReader<ReceivedCharacter>,

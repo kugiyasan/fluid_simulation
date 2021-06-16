@@ -18,7 +18,7 @@ const HEIGHT: usize = 20;
 const CELL_SIZE: f32 = 30.0;
 // const WIDTH: usize = 50;
 // const HEIGHT: usize = 50;
-// const CELL_SIZE: f32 = 10.0;
+// const CELL_SIZE: f32 = 20.0;
 
 const VERTEX_SHADER: &str = r"
 #version 450
@@ -46,7 +46,6 @@ void main() {
 }
 ";
 
-// TODO Maybe separate into VelocityGrid and DensityGrid
 // TODO make a double buffer
 #[derive(Clone)]
 struct Grid(Vec<Vec<Cell>>);
@@ -104,9 +103,12 @@ fn setup(mut commands: Commands, mut materials: ResMut<Assets<ColorMaterial>>) {
 
     // Grid
     let mut grid = Grid::new();
-    grid.0[4][4].density = 20.0;
-    grid.0[4][4].velocity.x = 20.0;
-    grid.0[4][4].velocity.y = -20.0;
+    for cell in &mut grid.0[4] {
+        cell.density = 20.0;
+    }
+    // grid.0[4][4].density = 20.0;
+    // grid.0[4][4].velocity.x = 20.0;
+    // grid.0[4][4].velocity.y = -20.0;
     commands.spawn().insert(grid);
 
     let half_cell = CELL_SIZE / 2.0;
@@ -213,19 +215,6 @@ fn window_startup_system(mut windows: ResMut<Windows>) {
     window.set_title("Fluid Simulation".to_string());
 }
 
-fn testing_system(time: Res<Time>, mut qg: Query<&mut Grid>) {
-    if let Ok(mut grid) = qg.single_mut() {
-        // let dt = time.delta_seconds();
-        let s = time.seconds_since_startup() as f32;
-        for row in &mut grid.0 {
-            for cell in row {
-                // cell.density = (cell.density + dt) % 1.0;
-                cell.velocity = Vec2::new(s.cos(), s.sin()) * s;
-            }
-        }
-    }
-}
-
 fn diffusion_system(time: Res<Time>, mut qg: Query<&mut Grid>) {
     if let Ok(mut grid) = qg.single_mut() {
         let mut new_grid = grid.clone();
@@ -238,7 +227,7 @@ fn diffusion_system(time: Res<Time>, mut qg: Query<&mut Grid>) {
                     new_grid.0[y][x].density = (grid.0[y][x].density + k * avg) / (1.0 + k);
 
                     let avg = new_grid.get_average(x, y, |cell| cell.velocity.x);
-                    new_grid.0[y][x].velocity.x = (grid.0[y][x].velocity.y + k * avg) / (1.0 + k);
+                    new_grid.0[y][x].velocity.x = (grid.0[y][x].velocity.x + k * avg) / (1.0 + k);
 
                     let avg = new_grid.get_average(x, y, |cell| cell.velocity.y);
                     new_grid.0[y][x].velocity.y = (grid.0[y][x].velocity.y + k * avg) / (1.0 + k);
@@ -246,6 +235,13 @@ fn diffusion_system(time: Res<Time>, mut qg: Query<&mut Grid>) {
             }
         }
         *grid = new_grid;
+
+        // TODO remove this
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                grid.0[y][x].velocity *= 0.99;
+            }
+        }
     }
 }
 
@@ -283,6 +279,10 @@ fn advection_system(time: Res<Time>, mut qg: Query<&mut Grid>) {
     }
 }
 
+fn clear_divergence_system(mut qg: Query<&mut Grid>) {
+    if let Ok(mut grid) = qg.single_mut() {}
+}
+
 /// Display the grid density values as squares
 fn density_square_system(
     qg: Query<&Grid>,
@@ -311,7 +311,7 @@ fn velocity_arrow_direction_system(
             let Position { x, y } = position;
             let vel: Vec2 = grid.0[*y][*x].velocity;
 
-            let angle = vel.angle_between(Vec2::X);
+            let angle = vel.angle_between(Vec2::Y);
             *rotation = Quat::from_rotation_z(angle + PI);
             // println!("{:?} {:?}", vel, rotation);
         }
@@ -343,7 +343,7 @@ fn velocity_arrow_color_system(
 /// https://github.com/bevyengine/bevy/blob/main/crates/bevy_window/src/event.rs
 ///
 /// This system prints out all mouse events as they come in
-fn print_mouse_events_system(
+fn mouse_events_system(
     mut qg: Query<&mut Grid>,
     mut mouse_motion_events: EventReader<MouseMotion>,
     mut cursor_moved_events: EventReader<CursorMoved>,
@@ -358,7 +358,7 @@ fn print_mouse_events_system(
             let x = (cursor_event.position.x / CELL_SIZE) as usize;
             let y = (cursor_event.position.y / CELL_SIZE) as usize;
             if x < WIDTH && y < HEIGHT {
-                grid.0[y][x].velocity = 5.0 * mouse_event.delta;
+                grid.0[y][x].velocity += 0.1 * mouse_event.delta;
             }
         }
     }
@@ -370,7 +370,7 @@ fn print_mouse_events_system(
     // }
 }
 
-fn print_char_event_system(
+fn char_event_system(
     mut qg: Query<&mut Grid>,
     mut char_input_events: EventReader<ReceivedCharacter>,
 ) {
@@ -392,11 +392,12 @@ fn main() {
         .add_startup_system(arrows_setup.system())
         // .add_system(testing_system.system())
         .add_system(diffusion_system.system())
-        // .add_system(advection_system.system())
+        .add_system(advection_system.system())
+        .add_system(clear_divergence_system.system())
         .add_system(velocity_arrow_direction_system.system())
         .add_system(velocity_arrow_color_system.system())
         .add_system(density_square_system.system())
-        .add_system(print_mouse_events_system.system())
-        .add_system(print_char_event_system.system())
+        .add_system(mouse_events_system.system())
+        .add_system(char_event_system.system())
         .run();
 }
